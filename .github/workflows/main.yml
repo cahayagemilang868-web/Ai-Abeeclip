@@ -34,14 +34,12 @@ jobs:
           cd project
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           
-          # Memaksa Gradle dan KotlinCompiler menggunakan target Java 17 agar konsisten
-          export org.gradle.java.home=$JAVA_HOME
-          
+          # Memaksa target Java dan Kotlin menjadi versi 17 melalui argumen Gradle
           if [ -f "./gradlew" ]; then
             chmod +x gradlew
-            ./gradlew assembleDebug -Dorg.gradle.java.home=$JAVA_HOME
+            ./gradlew assembleDebug -Pandroid.kotlinOptions.jvmTarget=17
           else
-            gradle assembleDebug -Dorg.gradle.java.home=$JAVA_HOME
+            gradle assembleDebug -Pandroid.kotlinOptions.jvmTarget=17
           fi
 
       - name: Upload APK
