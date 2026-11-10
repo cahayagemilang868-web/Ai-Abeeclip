@@ -27,14 +27,15 @@ jobs:
         run: |
           mkdir project
           unzip -o AI_Abeeclip_Android_Phone_Build.zip -d project
-          find project -name build.gradle.kts
+          
+          echo "=== Mencari file yang mengandung kata MovieEdit ==="
+          grep -rnw "project/" -e "MovieEdit" || echo "MovieEdit tidak ditemukan di file lain"
 
       - name: Build APK
         run: |
           cd project
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           
-          # Menonaktifkan validasi JVM target Kotlin agar tidak memblokir proses build
           if [ -f "./gradlew" ]; then
             chmod +x gradlew
             ./gradlew assembleDebug -Pkotlin.jvm.target.validation.mode=ignore
