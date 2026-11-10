@@ -28,8 +28,8 @@ jobs:
           mkdir project
           unzip -o AI_Abeeclip_Android_Phone_Build.zip -d project
           
-          echo "=== Mencari file yang mengandung kata MovieEdit ==="
-          grep -rnw "project/" -e "MovieEdit" || echo "MovieEdit tidak ditemukan di file lain"
+          echo "=== Mengganti otomatis Icons.Default.MovieEdit menjadi Icons.Default.Edit ==="
+          sed -i 's/Icons.Default.MovieEdit/Icons.Default.Edit/g' project/app/src/main/java/com/abeeclip/app/MainActivity.kt
 
       - name: Build APK
         run: |
