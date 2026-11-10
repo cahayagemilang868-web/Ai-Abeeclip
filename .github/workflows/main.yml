@@ -1,0 +1,45 @@
+
+name: Build AI Abeeclip APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Extract project
+        run: |
+          mkdir project
+          unzip -o AI_Abeeclip_Android_Phone_Build.zip -d project
+          find project -name build.gradle.kts
+
+      - name: Build APK
+        run: |
+          cd project
+          gradle assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Abeeclip-APK
+          path: project/**/build/outputs/apk/debug/*.apk
