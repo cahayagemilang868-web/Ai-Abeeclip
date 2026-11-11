@@ -28,8 +28,12 @@ jobs:
         run: |
           cd project
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          chmod +x gradlew
-          ./gradlew assembleDebug -Pkotlin.jvm.target.validation.mode=ignore
+          if [ -f "./gradlew" ]; then
+            chmod +x gradlew
+            ./gradlew assembleDebug -Pkotlin.jvm.target.validation.mode=ignore
+          else
+            gradle assembleDebug -Pkotlin.jvm.target.validation.mode=ignore
+          fi
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
