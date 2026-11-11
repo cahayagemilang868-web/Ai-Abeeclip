@@ -39,9 +39,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(Modifier.fillMaxSize(), color = Color(0xFF0E0E14)) {
-                    AppScreen()
-                }
+                Surface(Modifier.fillMaxSize(), color = Color(0xFF0E0E14)) { AppScreen() }
             }
         }
     }
@@ -80,13 +78,8 @@ fun AppScreen() {
         LengthItem("Panjang", "Gabungkan ucapan jadi kalimat utuh.", "Halo semuanya, selamat datang kembali hari ini.")
     )
     var lIdx by remember { mutableIntStateOf(0) }
-
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { u ->
-        if (u != null) {
-            uri = u
-            offsetX = 0f
-            result = "Video siap diproses!"
-        }
+        if (u != null) { uri = u; offsetX = 0f; result = "Video siap diproses!" }
     }
 
     Column(
@@ -131,50 +124,29 @@ fun AppScreen() {
 
                 val bw = if (ratio == "9:16") 190.dp else if (ratio == "1:1") 230.dp else 280.dp
                 val bh = if (ratio == "9:16") 310.dp else if (ratio == "1:1") 230.dp else 160.dp
-
                 Box(
                     modifier = Modifier.width(bw).height(bh).clip(RoundedCornerShape(14.dp)).background(Color.Black)
                         .border(1.5.dp, Color(0xFF7C4DFF), RoundedCornerShape(14.dp)).clipToBounds()
                         .pointerInput(ratio) {
-                            detectHorizontalDragGestures { _, d ->
-                                if (ratio != "16:9") offsetX = (offsetX + d).coerceIn(-220f, 220f)
-                            }
+                            detectHorizontalDragGestures { _, d -> if (ratio != "16:9") offsetX = (offsetX + d).coerceIn(-220f, 220f) }
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     AndroidView(
-                        factory = { c ->
-                            VideoView(c).apply {
-                                setOnPreparedListener { mp ->
-                                    mp.isLooping = true
-                                    start()
-                                }
-                            }
-                        },
+                        factory = { c -> VideoView(c).apply { setOnPreparedListener { mp -> mp.isLooping = true; start() } } },
                         update = { view -> view.setVideoURI(uri) },
                         modifier = Modifier.fillMaxHeight().wrapContentWidth(unbounded = true).graphicsLayer {
                             translationX = if (ratio == "16:9") 0f else animX
                             val sc = if (ratio == "9:16") 1.45f else if (ratio == "1:1") 1.2f else 1f
-                            scaleX = sc
-                            scaleY = sc
+                            scaleX = sc; scaleY = sc
                         }
                     )
-
                     Box(
                         modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp).clip(RoundedCornerShape(8.dp))
                             .background(if (hasBg) bgColor else Color(0x66000000)).padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        val rawSample = lengths[lIdx].sample
-                        val txt = if (upper) rawSample.uppercase() else rawSample
-                        val currentFont = fonts[fIdx]
-                        Text(
-                            text = txt,
-                            color = colors[cIdx],
-                            fontSize = 13.sp,
-                            fontFamily = currentFont.family,
-                            fontWeight = currentFont.weight,
-                            textAlign = TextAlign.Center
-                        )
+                        val txt = if (upper) lengths[lIdx].sample.uppercase() else lengths[lIdx].sample
+                        Text(txt, color = colors[cIdx], fontSize = 13.sp, fontFamily = fonts[fIdx].family, fontWeight = fonts[fIdx].weight, textAlign = TextAlign.Center)
                     }
                 }
 
@@ -186,14 +158,27 @@ fun AppScreen() {
             }
         }
 
-        Column(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF181822)).padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Text("Template Subtitle Viral", color = Color(0xFFFF80AB), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("Hormozi", "Karaoke", "Neon", "Film").forEach { t ->
-                    OptionChip(t, tplName == t, Color(0xFFFF80AB), Color.Black, modifier = Modifier.weight(1f)) {
-                        tplName = t
-                        when (t) {
-                            "Hormozi" -> { fIdx = 3; cIdx = 0; hasBg = false; upper = true }
+        StyleControlPanel(
+            tplName = tplName, fonts = fonts, fIdx = fIdx, colors = colors, cIdx = cIdx, hasBg = hasBg, lengths = lengths, lIdx = lIdx,
+            onSelectTemplate = { t ->
+                tplName = t
+                when (t) {
+                    "Hormozi" -> { fIdx = 3; cIdx = 0; hasBg = false; upper = true }
+                    "Karaoke" -> { fIdx = 3; cIdx = 1; bgColor = Color(0xDD7C4DFF); hasBg = true; upper = true }
+                    "Neon" -> { fIdx = 2; cIdx = 2; bgColor = Color(0xCC000000); hasBg = true; upper = false }
+                    "Film" -> { fIdx = 1; cIdx = 1; bgColor = Color(0x99000000); hasBg = true; upper = false }
+                }
+            },
+            onSelectFont = { idx -> fIdx = idx; tplName = "Custom" },
+            onSelectColor = { idx -> cIdx = idx; tplName = "Custom" },
+            onToggleBg = { hasBg = !hasBg; if (hasBg && bgColor == Color.Transparent) bgColor = Color(0xCC000000); tplName = "Custom" },
+            onSelectLength = { idx -> lIdx = idx }
+        )
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    val u = uri ?: return@Button Unit.also { result = "Pilih video dulu!" }
+                    loading = true
+                    scope.launch { result = GeminiHelper.analyzeVideo(ctx, u, "Temukan 3 Golden Moment viral beserta menit mulai-selesai dan alasannya."); loading = false }
+                },
