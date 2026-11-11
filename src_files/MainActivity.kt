@@ -143,12 +143,20 @@ fun AppScreen() {
                     contentAlignment = Alignment.Center
                 ) {
                     AndroidView(
-                        factory = { c -> VideoView(c).apply { setOnPreparedListener { mp -> mp.isLooping = true; start() } } },
+                        factory = { c ->
+                            VideoView(c).apply {
+                                setOnPreparedListener { mp ->
+                                    mp.isLooping = true
+                                    start()
+                                }
+                            }
+                        },
                         update = { view -> view.setVideoURI(uri) },
                         modifier = Modifier.fillMaxHeight().wrapContentWidth(unbounded = true).graphicsLayer {
                             translationX = if (ratio == "16:9") 0f else animX
                             val sc = if (ratio == "9:16") 1.45f else if (ratio == "1:1") 1.2f else 1f
-                            scaleX = sc; scaleY = sc
+                            scaleX = sc
+                            scaleY = sc
                         }
                     )
 
@@ -159,7 +167,14 @@ fun AppScreen() {
                         val rawSample = lengths[lIdx].sample
                         val txt = if (upper) rawSample.uppercase() else rawSample
                         val currentFont = fonts[fIdx]
-                        Text(txt, color = colors[cIdx], fontSize = 13.sp, fontFamily = currentFont.family, fontWeight = currentFont.weight, textAlign = TextAlign.Center)
+                        Text(
+                            text = txt,
+                            color = colors[cIdx],
+                            fontSize = 13.sp,
+                            fontFamily = currentFont.family,
+                            fontWeight = currentFont.weight,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
 
@@ -182,11 +197,3 @@ fun AppScreen() {
                         tplName = t
                         when (t) {
                             "Hormozi" -> { fIdx = 3; cIdx = 0; hasBg = false; upper = true }
-                            "Karaoke" -> { fIdx = 3; cIdx = 1; bgColor = Color(0xDD7C4DFF); hasBg = true; upper = true }
-                            "Neon" -> { fIdx = 2; cIdx = 2; bgColor = Color(0xCC000000); hasBg = true; upper = false }
-                            "Film" -> { fIdx = 1; cIdx = 1; bgColor = Color(0x99000000); hasBg = true; upper = false }
-                        }
-                    }
-                }
-            }
-
