@@ -1,45 +1,31 @@
 name: Build AI Abeeclip APK
-
 on:
   workflow_dispatch:
   push:
     branches: [main]
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Install Android SDK Components
-        run: |
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Build Complete AI Video Studio App
+      - name: Setup SDK
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Build Studio App
         env:
           API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           set -e
           mkdir -p project
           unzip -o AI_Abeeclip_Android_Phone_Build.zip -d project
-          
           sed -i '/dependencies {/a \    implementation("com.squareup.okhttp3:okhttp:4.12.0")' project/app/build.gradle.kts
-          
-          if ! grep -q "android.permission.INTERNET" project/app/src/main/AndroidManifest.xml; then
-            sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' project/app/src/main/AndroidManifest.xml
-          fi
+          grep -q "android.permission.INTERNET" project/app/src/main/AndroidManifest.xml || sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' project/app/src/main/AndroidManifest.xml
 
           cat << 'EOF' > project/app/src/main/java/com/abeeclip/app/GeminiHelper.kt
           package com.abeeclip.app
-
           import android.content.Context
           import android.net.Uri
           import android.util.Base64
@@ -55,75 +41,31 @@ jobs:
 
           object GeminiHelper {
               private const val API_KEY = "PLACEHOLDER_API_KEY"
-              private val client = OkHttpClient.Builder()
-                  .connectTimeout(90, TimeUnit.SECONDS)
-                  .readTimeout(90, TimeUnit.SECONDS)
-                  .writeTimeout(90, TimeUnit.SECONDS)
-                  .build()
-
+              private val client = OkHttpClient.Builder().connectTimeout(90, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build()
               suspend fun analyzeVideo(context: Context, videoUri: Uri, taskPrompt: String): String = withContext(Dispatchers.IO) {
                   try {
-                      val inputStream = context.contentResolver.openInputStream(videoUri)
-                          ?: return@withContext "Gagal membaca file video dari penyimpanan."
-                      
-                      val bytes = inputStream.readBytes()
-                      inputStream.close()
-
-                      if (bytes.size > 15 * 1024 * 1024) {
-                          return@withContext "Ukuran video terlalu besar (${bytes.size / (1024 * 1024)} MB). Gunakan video di bawah 15 MB untuk pemrosesan AI."
+                      val bytes = context.contentResolver.openInputStream(videoUri)?.use { it.readBytes() } ?: return@withContext "Gagal baca video."
+                      if (bytes.size > 15 * 1024 * 1024) return@withContext "Video > 15 MB. Gunakan video pendek."
+                      val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                      val mime = context.contentResolver.getType(videoUri) ?: "video/mp4"
+                      val json = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
+                          .put(JSONObject().put("inline_data", JSONObject().put("mime_type", mime).put("data", b64)))
+                          .put(JSONObject().put("text", taskPrompt)))))
+                      val req = Request.Builder().url("https://googleapis.com")
+                          .post(json.toString().toRequestBody("application/json".toMediaType())).build()
+                      client.newCall(req).execute().use { res ->
+                          val body = res.body?.string() ?: return@withContext "Respons kosong"
+                          if (!res.isSuccessful) return@withContext "Error AI (${res.code})"
+                          JSONObject(body).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text") ?: "Gagal baca hasil"
                       }
-
-                      val base64Video = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                      val mimeType = context.contentResolver.getType(videoUri) ?: "video/mp4"
-
-                      val url = "https://googleapis.com"
-                      
-                      val jsonBody = JSONObject().apply {
-                          put("contents", JSONArray().apply {
-                              put(JSONObject().apply {
-                                  put("parts", JSONArray().apply {
-                                      put(JSONObject().apply {
-                                          put("inline_data", JSONObject().apply {
-                                              put("mime_type", mimeType)
-                                              put("data", base64Video)
-                                          })
-                                      })
-                                      put(JSONObject().apply {
-                                          put("text", taskPrompt)
-                                      })
-                                  })
-                              })
-                          })
-                      }
-
-                      val request = Request.Builder()
-                          .url(url)
-                          .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                          .build()
-
-                      client.newCall(request).execute().use { response ->
-                          val body = response.body?.string() ?: return@withContext "Respons kosong dari AI"
-                          if (!response.isSuccessful) {
-                              return@withContext "Gagal menghubungi Gemini (${response.code}). Pastikan API Key valid."
-                          }
-                          val jsonResponse = JSONObject(body)
-                          val candidates = jsonResponse.optJSONArray("candidates")
-                          val content = candidates?.optJSONObject(0)?.optJSONObject("content")
-                          val parts = content?.optJSONArray("parts")
-                          return@withContext parts?.optJSONObject(0)?.optString("text") ?: "Tidak ada hasil teks dari AI."
-                      }
-                  } catch (e: Exception) {
-                      return@withContext "Terjadi kesalahan: ${e.localizedMessage}"
-                  }
+                  } catch (e: Exception) { "Error: ${e.localizedMessage}" }
               }
           }
           EOF
-
           sed -i "s/PLACEHOLDER_API_KEY/$API_KEY/g" project/app/src/main/java/com/abeeclip/app/GeminiHelper.kt
 
           cat << 'EOF' > project/app/src/main/java/com/abeeclip/app/VideoExportHelper.kt
           package com.abeeclip.app
-
           import android.content.ContentValues
           import android.content.Context
           import android.net.Uri
@@ -131,80 +73,97 @@ jobs:
           import android.os.Environment
           import android.provider.MediaStore
           import androidx.annotation.OptIn
-          import androidx.media3.common.Effect
           import androidx.media3.common.MediaItem
           import androidx.media3.common.util.UnstableApi
           import androidx.media3.effect.Crop
           import androidx.media3.effect.Presentation
-          import androidx.media3.transformer.Composition
-          import androidx.media3.transformer.EditedMediaItem
-          import androidx.media3.transformer.Effects
-          import androidx.media3.transformer.ExportException
-          import androidx.media3.transformer.ExportResult
-          import androidx.media3.transformer.Transformer
+          import androidx.media3.transformer.*
           import java.io.File
 
           object VideoExportHelper {
-
-              fun saveSrtToDownloads(context: Context, srtContent: String): String {
-                  return try {
-                      val fileName = "Abeeclip_Subtitle_${System.currentTimeMillis()}.srt"
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                          val values = ContentValues().apply {
-                              put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                              put(MediaStore.Downloads.MIME_TYPE, "application/x-subrip")
-                              put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                          }
-                          val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                              ?: return "Gagal membuat file di folder Downloads."
-                          context.contentResolver.openOutputStream(uri)?.use { out ->
-                              out.write(srtContent.toByteArray())
-                          }
-                      } else {
-                          val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                          val file = File(dir, fileName)
-                          file.writeText(srtContent)
+              fun saveSrt(context: Context, text: String): String = try {
+                  val name = "Abeeclip_${System.currentTimeMillis()}.srt"
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      val v = ContentValues().apply {
+                          put(MediaStore.Downloads.DISPLAY_NAME, name)
+                          put(MediaStore.Downloads.MIME_TYPE, "application/x-subrip")
+                          put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                       }
-                      "File SRT berhasil disimpan di folder Downloads ($fileName)!"
-                  } catch (e: Exception) {
-                      "Gagal menyimpan file SRT: ${e.localizedMessage}"
+                      context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v)?.let { uri ->
+                          context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                      }
+                  } else {
+                      File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name).writeText(text)
                   }
-              }
+                  "Tersimpan di Downloads: $name"
+              } catch (e: Exception) { "Gagal SRT: ${e.localizedMessage}" }
 
               @OptIn(UnstableApi::class)
-              fun exportVideoMp4(
-                  context: Context,
-                  videoUri: Uri,
-                  offsetX: Float,
-                  aspectRatio: String,
-                  onSuccess: (String) -> Unit,
-                  onError: (String) -> Unit
-              ) {
+              fun exportMp4(context: Context, uri: Uri, offsetX: Float, ratio: String, onDone: (String) -> Unit) {
                   try {
-                      val tempOutputFile = File(context.cacheDir, "abeeclip_render_${System.currentTimeMillis()}.mp4")
-                      val shift = (offsetX / 220f).coerceIn(-0.45f, 0.45f)
-                      val cropEffect = when (aspectRatio) {
-                          "9:16" -> Crop((-0.56f + shift).coerceIn(-1f, 0.4f), (0.56f + shift).coerceIn(-0.4f, 1f), -1f, 1f)
-                          "1:1" -> Crop((-0.75f + shift).coerceIn(-1f, 0.2f), (0.75f + shift).coerceIn(-0.2f, 1f), -1f, 1f)
+                      val out = File(context.cacheDir, "render_${System.currentTimeMillis()}.mp4")
+                      val s = (offsetX / 220f).coerceIn(-0.45f, 0.45f)
+                      val crop = when (ratio) {
+                          "9:16" -> Crop((-0.56f + s).coerceIn(-1f, 0.4f), (0.56f + s).coerceIn(-0.4f, 1f), -1f, 1f)
+                          "1:1" -> Crop((-0.75f + s).coerceIn(-1f, 0.2f), (0.75f + s).coerceIn(-0.2f, 1f), -1f, 1f)
                           else -> Crop(-1f, 1f, -1f, 1f)
                       }
+                      val h = if (ratio == "9:16") 1280 else if (ratio == "1:1") 1080 else 720
+                      val item = EditedMediaItem.Builder(MediaItem.fromUri(uri)).setEffects(Effects(emptyList(), listOf(crop, Presentation.createForHeight(h)))).build()
+                      Transformer.Builder(context).addListener(object : Transformer.Listener {
+                          override fun onCompleted(c: Composition, r: ExportResult) {
+                              val fn = "AI_Abeeclip_${System.currentTimeMillis()}.mp4"
+                              val v = ContentValues().apply {
+                                  put(MediaStore.Video.Media.DISPLAY_NAME, fn)
+                                  put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/AI Abeeclip")
+                              }
+                              context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v)?.let { u ->
+                                  context.contentResolver.openOutputStream(u)?.use { o -> out.inputStream().use { i -> i.copyTo(o) } }
+                              }
+                              out.delete()
+                              onDone("Sukses! Tersimpan di Galeri: Movies/AI Abeeclip/$fn")
+                          }
+                          override fun onError(c: Composition, r: ExportResult, e: ExportException) {
+                              out.delete()
+                              onDone("Gagal Render: ${e.localizedMessage}")
+                          }
+                      }).build().start(item, out.absolutePath)
+                  } catch (e: Exception) { onDone("Error Ekspor: ${e.localizedMessage}") }
+              }
+          }
+          EOF
 
-                      val targetHeight = when (aspectRatio) {
-                          "9:16" -> 1280
-                          "1:1" -> 1080
-                          else -> 720
-                      }
-
-                      val effectsList = listOf<Effect>(
-                          cropEffect,
-                          Presentation.createForHeight(targetHeight)
-                      )
-
-                      val mediaItem = MediaItem.fromUri(videoUri)
-                      val editedMediaItem = EditedMediaItem.Builder(mediaItem)
-                          .setEffects(Effects(emptyList(), effectsList))
-                          .build()
-
-                      val transformer = Transformer.Builder(context)
-                          .addListener(object : Transformer.Listener {
-                              override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+          cat << 'EOF' > project/app/src/main/java/com/abeeclip/app/MainActivity.kt
+          package com.abeeclip.app
+          import android.net.Uri
+          import android.os.Bundle
+          import android.widget.Toast
+          import android.widget.VideoView
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.compose.setContent
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.compose.animation.core.animateFloatAsState
+          import androidx.compose.foundation.*
+          import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.*
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.draw.clipToBounds
+          import androidx.compose.ui.geometry.Offset
+          import androidx.compose.ui.graphics.*
+          import androidx.compose.ui.input.pointer.pointerInput
+          import androidx.compose.ui.platform.LocalClipboardManager
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.AnnotatedString
+          import androidx.compose.ui.text.TextStyle
+          import androidx.compose.ui.text.font.FontFamily
+          import androidx.compose.ui.text.font.FontWeight
