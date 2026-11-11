@@ -1,4 +1,5 @@
 package com.abeeclip.app
+
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
@@ -49,6 +50,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+data class FontItem(val name: String, val family: FontFamily, val weight: FontWeight)
+data class LengthItem(val name: String, val prompt: String, val sample: String)
+
 @Composable
 fun AppScreen() {
     val ctx = LocalContext.current
@@ -63,10 +67,10 @@ fun AppScreen() {
     var ratio by remember { mutableStateOf("9:16") }
 
     val fonts = listOf(
-        Triple("Modern", FontFamily.SansSerif, FontWeight.SemiBold),
-        Triple("Klasik", FontFamily.Serif, FontWeight.Normal),
-        Triple("Ketik", FontFamily.Monospace, FontWeight.Medium),
-        Triple("Viral", FontFamily.SansSerif, FontWeight.ExtraBold)
+        FontItem("Modern", FontFamily.SansSerif, FontWeight.SemiBold),
+        FontItem("Klasik", FontFamily.Serif, FontWeight.Normal),
+        FontItem("Ketik", FontFamily.Monospace, FontWeight.Medium),
+        FontItem("Viral", FontFamily.SansSerif, FontWeight.ExtraBold)
     )
     var fIdx by remember { mutableIntStateOf(3) }
     val colors = listOf(Color(0xFFFFD54F), Color.White, Color(0xFF64FFDA), Color(0xFFFF5252))
@@ -77,9 +81,9 @@ fun AppScreen() {
     var tplName by remember { mutableStateOf("Hormozi") }
 
     val lengths = listOf(
-        Triple("Pendek", "Pecah teks 1-3 kata per baris waktu gaya TikTok/Reels.", "GAS VIRAL SEKARANG!"),
-        Triple("Sedang", "Buat teks 4-7 kata per baris waktu.", "Halo semuanya, selamat datang!"),
-        Triple("Panjang", "Gabungkan ucapan jadi kalimat utuh.", "Halo semuanya, selamat datang kembali hari ini.")
+        LengthItem("Pendek", "Pecah teks 1-3 kata per baris waktu gaya TikTok/Reels.", "GAS VIRAL SEKARANG!"),
+        LengthItem("Sedang", "Buat teks 4-7 kata per baris waktu.", "Halo semuanya, selamat datang!"),
+        LengthItem("Panjang", "Gabungkan ucapan jadi kalimat utuh.", "Halo semuanya, selamat datang kembali hari ini.")
     )
     var lIdx by remember { mutableIntStateOf(0) }
 
@@ -215,9 +219,5 @@ fun AppScreen() {
                             .background(if (hasBg) bgColor else Color.Transparent)
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        val txt = if (upper) lengths[lIdx].third.uppercase() else lengths[lIdx].third
-                        Text(
-                            text = txt,
-                            color = colors[cIdx],
-                            fontSize = 13.sp,
-                            fontFamily = fonts[fIdx].second,
+                        val rawSample = lengths[lIdx].sample
+                        val txt = if (upper) rawSample.uppercase() else rawSample
