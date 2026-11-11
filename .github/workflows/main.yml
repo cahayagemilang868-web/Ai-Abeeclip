@@ -23,13 +23,88 @@ jobs:
         run: |
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Extract project
+      - name: Extract and Connect Gemini AI
+        env:
+          API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           mkdir project
           unzip -o AI_Abeeclip_Android_Phone_Build.zip -d project
           
-          echo "=== Mengganti otomatis Icons.Default.MovieEdit menjadi Icons.Default.Edit ==="
+          # 1. Perbaikan ikon lama
           sed -i 's/Icons.Default.MovieEdit/Icons.Default.Edit/g' project/app/src/main/java/com/abeeclip/app/MainActivity.kt
+          
+          # 2. Menambahkan library OkHttp untuk koneksi ke Gemini API
+          sed -i '/dependencies {/a \    implementation("com.squareup.okhttp3:okhttp:4.12.0")' project/app/build.gradle.kts
+          
+          # 3. Memastikan izin Internet aktif di AndroidManifest.xml
+          if ! grep -q "android.permission.INTERNET" project/app/src/main/AndroidManifest.xml; then
+            sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' project/app/src/main/AndroidManifest.xml
+          fi
+
+          # 4. Membuat file Helper penghubung Gemini API asli
+          cat << 'EOF' > project/app/src/main/java/com/abeeclip/app/GeminiHelper.kt
+          package com.abeeclip.app
+
+          import android.content.Context
+          import android.net.Uri
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import okhttp3.MediaType.Companion.toMediaType
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import okhttp3.RequestBody.Companion.toRequestBody
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.util.concurrent.TimeUnit
+
+          object GeminiHelper {
+              private const val API_KEY = "PLACEHOLDER_API_KEY"
+              private val client = OkHttpClient.Builder()
+                  .connectTimeout(60, TimeUnit.SECONDS)
+                  .readTimeout(60, TimeUnit.SECONDS)
+                  .writeTimeout(60, TimeUnit.SECONDS)
+                  .build()
+
+              suspend fun analyzeVideoPrompt(promptText: String): String = withContext(Dispatchers.IO) {
+                  try {
+                      val url = "https://googleapis.com"
+                      val jsonBody = JSONObject().apply {
+                          put("contents", JSONArray().apply {
+                              put(JSONObject().apply {
+                                  put("parts", JSONArray().apply {
+                                      put(JSONObject().apply {
+                                          put("text", promptText)
+                                      })
+                                  })
+                              })
+                          })
+                      }
+
+                      val request = Request.Builder()
+                          .url(url)
+                          .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                          .build()
+
+                      client.newCall(request).execute().use { response ->
+                          val body = response.body?.string() ?: return@withContext "Respons kosong dari AI"
+                          if (!response.isSuccessful) {
+                              return@withContext "Error AI (${response.code}): Cek kuota atau API Key"
+                          }
+                          val jsonResponse = JSONObject(body)
+                          val candidates = jsonResponse.optJSONArray("candidates")
+                          val content = candidates?.optJSONObject(0)?.optJSONObject("content")
+                          val parts = content?.optJSONArray("parts")
+                          return@withContext parts?.optJSONObject(0)?.optString("text") ?: "Gagal membaca hasil AI"
+                      }
+                  } catch (e: Exception) {
+                      return@withContext "Gagal terhubung ke server AI: ${e.localizedMessage}"
+                  }
+              }
+          }
+          EOF
+
+          # Menyisipkan API Key rahasia ke dalam file GeminiHelper.kt
+          sed -i "s/PLACEHOLDER_API_KEY/$API_KEY/g" project/app/src/main/java/com/abeeclip/app/GeminiHelper.kt
 
       - name: Build APK
         run: |
