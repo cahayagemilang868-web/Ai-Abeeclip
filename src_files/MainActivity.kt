@@ -12,7 +12,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -47,9 +46,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-data class FontItem(val name: String, val family: FontFamily, val weight: FontWeight)
-data class LengthItem(val name: String, val prompt: String, val sample: String)
 
 @Composable
 fun AppScreen() {
@@ -94,27 +90,15 @@ fun AppScreen() {
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("AI Abeeclip", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 Text("AI Video Clipper & Subtitle Studio", fontSize = 12.sp, color = Color(0xFF9E9EB8))
             }
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF282044))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
+            Box(Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF282044)).padding(horizontal = 10.dp, vertical = 4.dp)) {
                 Text("PRO STUDIO", color = Color(0xFFB388FF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
@@ -127,43 +111,20 @@ fun AppScreen() {
         ) {
             Icon(Icons.Default.VideoLibrary, contentDescription = null, tint = Color.White)
             Spacer(Modifier.width(8.dp))
-            Text(
-                text = if (uri == null) "+ Pilih Video dari Perangkat" else "Ganti Video Terpilih",
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
+            Text(if (uri == null) "+ Pilih Video dari Perangkat" else "Ganti Video Terpilih", fontWeight = FontWeight.Bold, color = Color.White)
         }
 
         if (uri != null) {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF181822))
-                    .padding(12.dp),
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF181822)).padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("Rasio Bingkai:", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("9:16", "1:1", "16:9").forEach { r ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (ratio == r) Color(0xFF7C4DFF) else Color(0xFF252534))
-                                    .clickable {
-                                        ratio = r
-                                        offsetX = 0f
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(r, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
+                            OptionChip(label = r, isSelected = ratio == r) { ratio = r; offsetX = 0f }
                         }
                     }
                 }
@@ -172,52 +133,60 @@ fun AppScreen() {
                 val bh = if (ratio == "9:16") 310.dp else if (ratio == "1:1") 230.dp else 160.dp
 
                 Box(
-                    modifier = Modifier
-                        .width(bw)
-                        .height(bh)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.Black)
-                        .border(1.5.dp, Color(0xFF7C4DFF), RoundedCornerShape(14.dp))
-                        .clipToBounds()
+                    modifier = Modifier.width(bw).height(bh).clip(RoundedCornerShape(14.dp)).background(Color.Black)
+                        .border(1.5.dp, Color(0xFF7C4DFF), RoundedCornerShape(14.dp)).clipToBounds()
                         .pointerInput(ratio) {
                             detectHorizontalDragGestures { _, d ->
-                                if (ratio != "16:9") {
-                                    offsetX = (offsetX + d).coerceIn(-220f, 220f)
-                                }
+                                if (ratio != "16:9") offsetX = (offsetX + d).coerceIn(-220f, 220f)
                             }
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     AndroidView(
-                        factory = { c ->
-                            VideoView(c).apply {
-                                setOnPreparedListener { mp ->
-                                    mp.isLooping = true
-                                    start()
-                                }
-                            }
-                        },
+                        factory = { c -> VideoView(c).apply { setOnPreparedListener { mp -> mp.isLooping = true; start() } } },
                         update = { view -> view.setVideoURI(uri) },
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .wrapContentWidth(unbounded = true)
-                            .graphicsLayer {
-                                translationX = if (ratio == "16:9") 0f else animX
-                                val sc = if (ratio == "9:16") 1.45f else if (ratio == "1:1") 1.2f else 1f
-                                scaleX = sc
-                                scaleY = sc
-                            }
+                        modifier = Modifier.fillMaxHeight().wrapContentWidth(unbounded = true).graphicsLayer {
+                            translationX = if (ratio == "16:9") 0f else animX
+                            val sc = if (ratio == "9:16") 1.45f else if (ratio == "1:1") 1.2f else 1f
+                            scaleX = sc; scaleY = sc
+                        }
                     )
 
                     Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(12.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (hasBg) bgColor else Color(0x66000000))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp).clip(RoundedCornerShape(8.dp))
+                            .background(if (hasBg) bgColor else Color(0x66000000)).padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         val rawSample = lengths[lIdx].sample
                         val txt = if (upper) rawSample.uppercase() else rawSample
                         val currentFont = fonts[fIdx]
-                        Text(
+                        Text(txt, color = colors[cIdx], fontSize = 13.sp, fontFamily = currentFont.family, fontWeight = currentFont.weight, textAlign = TextAlign.Center)
+                    }
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OptionChip("Kiri", offsetX > 40f, modifier = Modifier.weight(1f)) { offsetX = 160f }
+                    OptionChip("Tengah", offsetX in -40f..40f, modifier = Modifier.weight(1f)) { offsetX = 0f }
+                    OptionChip("Kanan", offsetX < -40f, modifier = Modifier.weight(1f)) { offsetX = -160f }
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF181822)).padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("Template Subtitle Viral", color = Color(0xFFFF80AB), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("Hormozi", "Karaoke", "Neon", "Film").forEach { t ->
+                    OptionChip(t, tplName == t, Color(0xFFFF80AB), Color.Black, modifier = Modifier.weight(1f)) {
+                        tplName = t
+                        when (t) {
+                            "Hormozi" -> { fIdx = 3; cIdx = 0; hasBg = false; upper = true }
+                            "Karaoke" -> { fIdx = 3; cIdx = 1; bgColor = Color(0xDD7C4DFF); hasBg = true; upper = true }
+                            "Neon" -> { fIdx = 2; cIdx = 2; bgColor = Color(0xCC000000); hasBg = true; upper = false }
+                            "Film" -> { fIdx = 1; cIdx = 1; bgColor = Color(0x99000000); hasBg = true; upper = false }
+                        }
+                    }
+                }
+            }
+
