@@ -23,22 +23,20 @@ jobs:
         run: |
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Build Complete AI Video Studio App with Subtitle Templates
+      - name: Build Complete AI Video Studio App
         env:
           API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          mkdir project
+          set -e
+          mkdir -p project
           unzip -o AI_Abeeclip_Android_Phone_Build.zip -d project
           
-          # 1. Tambahkan library OkHttp
           sed -i '/dependencies {/a \    implementation("com.squareup.okhttp3:okhttp:4.12.0")' project/app/build.gradle.kts
           
-          # 2. Pastikan izin Internet aktif di AndroidManifest.xml
           if ! grep -q "android.permission.INTERNET" project/app/src/main/AndroidManifest.xml; then
             sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' project/app/src/main/AndroidManifest.xml
           fi
 
-          # 3. Buat GeminiHelper.kt (Multimodal AI Analyzer)
           cat << 'EOF' > project/app/src/main/java/com/abeeclip/app/GeminiHelper.kt
           package com.abeeclip.app
 
@@ -123,7 +121,6 @@ jobs:
 
           sed -i "s/PLACEHOLDER_API_KEY/$API_KEY/g" project/app/src/main/java/com/abeeclip/app/GeminiHelper.kt
 
-          # 4. Buat VideoExportHelper.kt
           cat << 'EOF' > project/app/src/main/java/com/abeeclip/app/VideoExportHelper.kt
           package com.abeeclip.app
 
@@ -209,3 +206,5 @@ jobs:
                           .build()
 
                       val transformer = Transformer.Builder(context)
+                          .addListener(object : Transformer.Listener {
+                              override fun onCompleted(composition: Composition, exportResult: ExportResult) {
