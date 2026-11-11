@@ -22,13 +22,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -216,8 +214,10 @@ fun AppScreen() {
                             .align(Alignment.BottomCenter)
                             .padding(12.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (hasBg) bgColor else Color.Transparent)
+                            .background(if (hasBg) bgColor else Color(0x66000000))
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         val rawSample = lengths[lIdx].sample
                         val txt = if (upper) rawSample.uppercase() else rawSample
+                        val currentFont = fonts[fIdx]
+                        Text(
