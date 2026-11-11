@@ -14,156 +14,24 @@ jobs:
           java-version: '17'
       - name: Setup SDK
         run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Build Studio App
+      - name: Prepare Project
         env:
           API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          set -e
           mkdir -p project
           unzip -o AI_Abeeclip_Android_Phone_Build.zip -d project
           sed -i '/dependencies {/a \    implementation("com.squareup.okhttp3:okhttp:4.12.0")' project/app/build.gradle.kts
           grep -q "android.permission.INTERNET" project/app/src/main/AndroidManifest.xml || sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />' project/app/src/main/AndroidManifest.xml
-
-          cat << 'EOF' > project/app/src/main/java/com/abeeclip/app/GeminiHelper.kt
-          package com.abeeclip.app
-          import android.content.Context
-          import android.net.Uri
-          import android.util.Base64
-          import kotlinx.coroutines.Dispatchers
-          import kotlinx.coroutines.withContext
-          import okhttp3.MediaType.Companion.toMediaType
-          import okhttp3.OkHttpClient
-          import okhttp3.Request
-          import okhttp3.RequestBody.Companion.toRequestBody
-          import org.json.JSONArray
-          import org.json.JSONObject
-          import java.util.concurrent.TimeUnit
-
-          object GeminiHelper {
-              private const val API_KEY = "PLACEHOLDER_API_KEY"
-              private val client = OkHttpClient.Builder().connectTimeout(90, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build()
-              suspend fun analyzeVideo(context: Context, videoUri: Uri, taskPrompt: String): String = withContext(Dispatchers.IO) {
-                  try {
-                      val bytes = context.contentResolver.openInputStream(videoUri)?.use { it.readBytes() } ?: return@withContext "Gagal baca video."
-                      if (bytes.size > 15 * 1024 * 1024) return@withContext "Video > 15 MB. Gunakan video pendek."
-                      val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-                      val mime = context.contentResolver.getType(videoUri) ?: "video/mp4"
-                      val json = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
-                          .put(JSONObject().put("inline_data", JSONObject().put("mime_type", mime).put("data", b64)))
-                          .put(JSONObject().put("text", taskPrompt)))))
-                      val req = Request.Builder().url("https://googleapis.com")
-                          .post(json.toString().toRequestBody("application/json".toMediaType())).build()
-                      client.newCall(req).execute().use { res ->
-                          val body = res.body?.string() ?: return@withContext "Respons kosong"
-                          if (!res.isSuccessful) return@withContext "Error AI (${res.code})"
-                          JSONObject(body).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text") ?: "Gagal baca hasil"
-                      }
-                  } catch (e: Exception) { "Error: ${e.localizedMessage}" }
-              }
-          }
-          EOF
+          cp -f src_files/*.kt project/app/src/main/java/com/abeeclip/app/
           sed -i "s/PLACEHOLDER_API_KEY/$API_KEY/g" project/app/src/main/java/com/abeeclip/app/GeminiHelper.kt
-
-          cat << 'EOF' > project/app/src/main/java/com/abeeclip/app/VideoExportHelper.kt
-          package com.abeeclip.app
-          import android.content.ContentValues
-          import android.content.Context
-          import android.net.Uri
-          import android.os.Build
-          import android.os.Environment
-          import android.provider.MediaStore
-          import androidx.annotation.OptIn
-          import androidx.media3.common.MediaItem
-          import androidx.media3.common.util.UnstableApi
-          import androidx.media3.effect.Crop
-          import androidx.media3.effect.Presentation
-          import androidx.media3.transformer.*
-          import java.io.File
-
-          object VideoExportHelper {
-              fun saveSrt(context: Context, text: String): String = try {
-                  val name = "Abeeclip_${System.currentTimeMillis()}.srt"
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      val v = ContentValues().apply {
-                          put(MediaStore.Downloads.DISPLAY_NAME, name)
-                          put(MediaStore.Downloads.MIME_TYPE, "application/x-subrip")
-                          put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                      }
-                      context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v)?.let { uri ->
-                          context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
-                      }
-                  } else {
-                      File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), name).writeText(text)
-                  }
-                  "Tersimpan di Downloads: $name"
-              } catch (e: Exception) { "Gagal SRT: ${e.localizedMessage}" }
-
-              @OptIn(UnstableApi::class)
-              fun exportMp4(context: Context, uri: Uri, offsetX: Float, ratio: String, onDone: (String) -> Unit) {
-                  try {
-                      val out = File(context.cacheDir, "render_${System.currentTimeMillis()}.mp4")
-                      val s = (offsetX / 220f).coerceIn(-0.45f, 0.45f)
-                      val crop = when (ratio) {
-                          "9:16" -> Crop((-0.56f + s).coerceIn(-1f, 0.4f), (0.56f + s).coerceIn(-0.4f, 1f), -1f, 1f)
-                          "1:1" -> Crop((-0.75f + s).coerceIn(-1f, 0.2f), (0.75f + s).coerceIn(-0.2f, 1f), -1f, 1f)
-                          else -> Crop(-1f, 1f, -1f, 1f)
-                      }
-                      val h = if (ratio == "9:16") 1280 else if (ratio == "1:1") 1080 else 720
-                      val item = EditedMediaItem.Builder(MediaItem.fromUri(uri)).setEffects(Effects(emptyList(), listOf(crop, Presentation.createForHeight(h)))).build()
-                      Transformer.Builder(context).addListener(object : Transformer.Listener {
-                          override fun onCompleted(c: Composition, r: ExportResult) {
-                              val fn = "AI_Abeeclip_${System.currentTimeMillis()}.mp4"
-                              val v = ContentValues().apply {
-                                  put(MediaStore.Video.Media.DISPLAY_NAME, fn)
-                                  put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/AI Abeeclip")
-                              }
-                              context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v)?.let { u ->
-                                  context.contentResolver.openOutputStream(u)?.use { o -> out.inputStream().use { i -> i.copyTo(o) } }
-                              }
-                              out.delete()
-                              onDone("Sukses! Tersimpan di Galeri: Movies/AI Abeeclip/$fn")
-                          }
-                          override fun onError(c: Composition, r: ExportResult, e: ExportException) {
-                              out.delete()
-                              onDone("Gagal Render: ${e.localizedMessage}")
-                          }
-                      }).build().start(item, out.absolutePath)
-                  } catch (e: Exception) { onDone("Error Ekspor: ${e.localizedMessage}") }
-              }
-          }
-          EOF
-
-          cat << 'EOF' > project/app/src/main/java/com/abeeclip/app/MainActivity.kt
-          package com.abeeclip.app
-          import android.net.Uri
-          import android.os.Bundle
-          import android.widget.Toast
-          import android.widget.VideoView
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.rememberLauncherForActivityResult
-          import androidx.activity.compose.setContent
-          import androidx.activity.result.contract.ActivityResultContracts
-          import androidx.compose.animation.core.animateFloatAsState
-          import androidx.compose.foundation.*
-          import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.shape.CircleShape
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.*
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.draw.clipToBounds
-          import androidx.compose.ui.geometry.Offset
-          import androidx.compose.ui.graphics.*
-          import androidx.compose.ui.input.pointer.pointerInput
-          import androidx.compose.ui.platform.LocalClipboardManager
-          import androidx.compose.ui.platform.LocalContext
-          import androidx.compose.ui.text.AnnotatedString
-          import androidx.compose.ui.text.TextStyle
-          import androidx.compose.ui.text.font.FontFamily
-          import androidx.compose.ui.text.font.FontWeight
+      - name: Build APK
+        run: |
+          cd project
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+          ./gradlew assembleDebug -Pkotlin.jvm.target.validation.mode=ignore
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Abeeclip-APK
+          path: project/**/build/outputs/apk/debug/*.apk
