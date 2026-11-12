@@ -18,7 +18,10 @@ import java.util.concurrent.TimeUnit
 
 object GeminiHelper {
     private const val API_KEY = "PLACEHOLDER_API_KEY"
-    private const val HOST = "https://googleapis.com"
+    private const val SUB = "generativelanguage"
+    private const val DOM = "googleapis.com"
+    private val HOST = "https://$SUB.$DOM"
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(120, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -45,7 +48,7 @@ object GeminiHelper {
             val uploadUrl = client.newCall(initReq).execute().use { res ->
                 if (!res.isSuccessful) {
                     val errBody = res.body?.string() ?: ""
-                    return@withContext "Gagal memulai unggahan (${res.code}) ke $uploadEndpoint: $errBody"
+                    return@withContext "Gagal memulai unggahan (${res.code}): $errBody"
                 }
                 res.header("X-Goog-Upload-URL") ?: res.header("x-goog-upload-url")
                     ?: return@withContext "URL unggah tidak ditemukan di header."
