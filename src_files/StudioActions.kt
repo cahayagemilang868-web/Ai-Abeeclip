@@ -2,7 +2,7 @@ package com.abeeclip.app
 
 import android.net.Uri
 import android.widget.Toast
-import android.widget.VideoView
+import androidx.annotation.OptIn
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -26,17 +26,38 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.launch
 
+@OptIn(UnstableApi::class)
 @Composable
 fun VideoPreviewSection(
     uri: Uri, ratio: String, offsetX: Float, sampleText: String,
     textColor: Color, fontItem: FontItem, hasBg: Boolean, bgColor: Color,
     onRatioChange: (String) -> Unit, onOffsetChange: (Float) -> Unit
 ) {
+    val ctx = LocalContext.current
     val animX by animateFloatAsState(offsetX, label = "x")
     val bw = if (ratio == "9:16") 190.dp else if (ratio == "1:1") 230.dp else 280.dp
     val bh = if (ratio == "9:16") 310.dp else if (ratio == "1:1") 230.dp else 160.dp
+
+    val exoPlayer = remember(uri) {
+        ExoPlayer.Builder(ctx).build().apply {
+            setMediaItem(MediaItem.fromUri(uri))
+            repeatMode = Player.REPEAT_MODE_ALL
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        onDispose { exoPlayer.release() }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF181822)).padding(12.dp),
@@ -57,12 +78,17 @@ fun VideoPreviewSection(
             contentAlignment = Alignment.Center
         ) {
             AndroidView(
-                factory = { c -> VideoView(c).apply { setOnPreparedListener { mp -> mp.isLooping = true; start() } } },
-                update = { view -> view.setVideoURI(uri) },
-                modifier = Modifier.fillMaxHeight().wrapContentWidth(unbounded = true).graphicsLayer {
+                factory = { c ->
+                    PlayerView(c).apply {
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    }
+                },
+                update = { view ->
+                    view.player = exoPlayer
+                },
+                modifier = Modifier.fillMaxSize().graphicsLayer {
                     translationX = if (ratio == "16:9") 0f else animX
-                    val sc = if (ratio == "9:16") 1.45f else if (ratio == "1:1") 1.2f else 1f
-                    scaleX = sc; scaleY = sc
                 }
             )
             Box(
@@ -90,14 +116,14 @@ fun AiActionSection(
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf("Pilih video (maks. 15 MB) lalu jalankan analisis AI atau Render MP4.") }
+    var result by remember { mutableStateOf("Pilih video dari perangkat lalu jalankan analisis AI atau Render MP4.") }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
             onClick = {
                 val u = uri ?: return@Button Unit.also { result = "Pilih video dulu!" }
                 loading = true
-                scope.launch { result = GeminiHelper.analyzeVideo(ctx, u, "Temukan 3 Golden Moment viral beserta menit mulai-selesai dan alasannya."); loading = false }
+                scope.launch { result = GeminiHelper.analyzeVideo(ctx, u, "Temukan 3 Golden Moment viral beserta menit mulai-selesai dan alasannya dalam bahasa Indonesia."); loading = false }
             },
             modifier = Modifier.weight(1f).height(46.dp), shape = RoundedCornerShape(12.dp), contentPadding = PaddingValues(4.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2438))
@@ -161,10 +187,3 @@ fun AiActionSection(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (loading) CircularProgressIndicator(Modifier.size(16.dp), color = Color(0xFFB388FF), strokeWidth = 2.dp)
                 OptionChip("Salin", false) { clip.setText(AnnotatedString(result)); Toast.makeText(ctx, "Disalin!", Toast.LENGTH_SHORT).show() }
-                OptionChip(".SRT", true, Color(0xFF282044), Color(0xFFB388FF)) { Toast.makeText(ctx, VideoExportHelper.saveSrt(ctx, result), Toast.LENGTH_LONG).show() }
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(if (loading) "Memproses video dengan Gemini AI..." else result, color = textColor, fontSize = 13.sp, fontFamily = fontItem.family, fontWeight = fontItem.weight)
-    }
-}
