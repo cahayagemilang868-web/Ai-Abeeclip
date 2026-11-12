@@ -23,9 +23,9 @@ object GeminiHelper {
     private val HOST = "https://$SUB.$DOM"
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(120, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(120, TimeUnit.SECONDS)
+        .connectTimeout(300, TimeUnit.SECONDS)
+        .readTimeout(300, TimeUnit.SECONDS)
+        .writeTimeout(300, TimeUnit.SECONDS)
         .build()
 
     suspend fun analyzeVideo(context: Context, videoUri: Uri, taskPrompt: String): String = withContext(Dispatchers.IO) {
