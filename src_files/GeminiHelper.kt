@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 
 object GeminiHelper {
     private const val API_KEY = "PLACEHOLDER_API_KEY"
+    private const val HOST = "https://googleapis.com"
     private val client = OkHttpClient.Builder()
         .connectTimeout(120, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -30,9 +31,10 @@ object GeminiHelper {
             val fileSize = context.contentResolver.openAssetFileDescriptor(videoUri, "r")?.use { it.length } ?: -1L
             if (fileSize <= 0L) return@withContext "Gagal membaca ukuran file video."
 
+            val uploadEndpoint = "$HOST/upload/v1beta/files?key=$API_KEY"
             val initJson = JSONObject().put("file", JSONObject().put("displayName", "abeeclip_video"))
             val initReq = Request.Builder()
-                .url("https://googleapis.com")
+                .url(uploadEndpoint)
                 .addHeader("X-Goog-Upload-Protocol", "resumable")
                 .addHeader("X-Goog-Upload-Command", "start")
                 .addHeader("X-Goog-Upload-Header-Content-Length", fileSize.toString())
@@ -43,7 +45,7 @@ object GeminiHelper {
             val uploadUrl = client.newCall(initReq).execute().use { res ->
                 if (!res.isSuccessful) {
                     val errBody = res.body?.string() ?: ""
-                    return@withContext "Gagal memulai unggahan (${res.code}): $errBody"
+                    return@withContext "Gagal memulai unggahan (${res.code}) ke $uploadEndpoint: $errBody"
                 }
                 res.header("X-Goog-Upload-URL") ?: res.header("x-goog-upload-url")
                     ?: return@withContext "URL unggah tidak ditemukan di header."
@@ -79,8 +81,9 @@ object GeminiHelper {
             var attempts = 0
             while (state == "PROCESSING" && attempts < 30) {
                 delay(3000)
+                val checkEndpoint = "$HOST/v1beta/$fileName?key=$API_KEY"
                 val checkReq = Request.Builder()
-                    .url("https://googleapis.com")
+                    .url(checkEndpoint)
                     .get()
                     .build()
                 state = client.newCall(checkReq).execute().use { res ->
@@ -92,12 +95,13 @@ object GeminiHelper {
 
             if (state != "ACTIVE") return@withContext "Video gagal diproses server AI (Status: $state)."
 
+            val genEndpoint = "$HOST/v1beta/models/gemini-2.5-flash:generateContent?key=$API_KEY"
             val genJson = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
                 .put(JSONObject().put("fileData", JSONObject().put("mimeType", mimeType).put("fileUri", fileUri)))
                 .put(JSONObject().put("text", taskPrompt)))))
 
             val genReq = Request.Builder()
-                .url("https://googleapis.com")
+                .url(genEndpoint)
                 .post(genJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
 
