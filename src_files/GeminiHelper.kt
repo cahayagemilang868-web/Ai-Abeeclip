@@ -30,23 +30,25 @@ object GeminiHelper {
             val fileSize = context.contentResolver.openAssetFileDescriptor(videoUri, "r")?.use { it.length } ?: -1L
             if (fileSize <= 0L) return@withContext "Gagal membaca ukuran file video."
 
-            // 1. Minta sesi unggah Resumable ke Gemini Files API
-            val initJson = JSONObject().put("file", JSONObject().put("display_name", "abeeclip_video"))
+            val initJson = JSONObject().put("file", JSONObject().put("displayName", "abeeclip_video"))
             val initReq = Request.Builder()
                 .url("https://googleapis.com")
                 .addHeader("X-Goog-Upload-Protocol", "resumable")
                 .addHeader("X-Goog-Upload-Command", "start")
                 .addHeader("X-Goog-Upload-Header-Content-Length", fileSize.toString())
                 .addHeader("X-Goog-Upload-Header-Content-Type", mimeType)
-                .post(initJson.toString().toRequestBody("application/json".toMediaType()))
+                .post(initJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
 
             val uploadUrl = client.newCall(initReq).execute().use { res ->
-                if (!res.isSuccessful) return@withContext "Gagal memulai unggahan (${res.code})."
-                res.header("X-Goog-Upload-URL") ?: return@withContext "URL unggah tidak ditemukan."
+                if (!res.isSuccessful) {
+                    val errBody = res.body?.string() ?: ""
+                    return@withContext "Gagal memulai unggahan (${res.code}): $errBody"
+                }
+                res.header("X-Goog-Upload-URL") ?: res.header("x-goog-upload-url")
+                    ?: return@withContext "URL unggah tidak ditemukan di header."
             }
 
-            // 2. Unggah aliran video langsung tanpa membebani RAM HP
             val streamBody = object : RequestBody() {
                 override fun contentType() = mimeType.toMediaType()
                 override fun contentLength() = fileSize
@@ -66,14 +68,13 @@ object GeminiHelper {
 
             val fileInfo = client.newCall(uploadReq).execute().use { res ->
                 val body = res.body?.string() ?: return@withContext "Respons unggah kosong."
-                if (!res.isSuccessful) return@withContext "Gagal mengunggah video (${res.code})."
+                if (!res.isSuccessful) return@withContext "Gagal mengunggah video (${res.code}): $body"
                 JSONObject(body).optJSONObject("file") ?: return@withContext "Data file tidak valid."
             }
 
             val fileUri = fileInfo.optString("uri")
             val fileName = fileInfo.optString("name")
 
-            // 3. Tunggu server Google selesai memproses video hingga status ACTIVE
             var state = fileInfo.optString("state")
             var attempts = 0
             while (state == "PROCESSING" && attempts < 30) {
@@ -91,14 +92,13 @@ object GeminiHelper {
 
             if (state != "ACTIVE") return@withContext "Video gagal diproses server AI (Status: $state)."
 
-            // 4. Jalankan analisis video menggunakan Gemini 2.5 Flash
             val genJson = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
-                .put(JSONObject().put("file_data", JSONObject().put("mime_type", mimeType).put("file_uri", fileUri)))
+                .put(JSONObject().put("fileData", JSONObject().put("mimeType", mimeType).put("fileUri", fileUri)))
                 .put(JSONObject().put("text", taskPrompt)))))
 
             val genReq = Request.Builder()
                 .url("https://googleapis.com")
-                .post(genJson.toString().toRequestBody("application/json".toMediaType()))
+                .post(genJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
                 .build()
 
             client.newCall(genReq).execute().use { res ->
