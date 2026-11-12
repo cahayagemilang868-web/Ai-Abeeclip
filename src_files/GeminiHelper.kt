@@ -98,7 +98,7 @@ object GeminiHelper {
 
             if (state != "ACTIVE") return@withContext "Video gagal diproses server AI (Status: $state)."
 
-            val genEndpoint = "$HOST/v1beta/models/gemini-2.5-flash:generateContent?key=$API_KEY"
+            val genEndpoint = "$HOST/v1beta/models/gemini-3.8-flash:generateContent?key=$API_KEY"
             val genJson = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
                 .put(JSONObject().put("fileData", JSONObject().put("mimeType", mimeType).put("fileUri", fileUri)))
                 .put(JSONObject().put("text", taskPrompt)))))
