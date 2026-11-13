@@ -30,24 +30,19 @@ object GeminiHelper {
         .build()
 
     suspend fun analyzeVideo(context: Context, videoUri: Uri, taskPrompt: String): String = withContext(Dispatchers.IO) {
-        var compressedFile: File? = null
+        var audioFile: File? = null
         try {
-            // 1. Kompres video otomatis ke 360p agar unggah super cepat
-            compressedFile = VideoExportHelper.compressForAi(context, videoUri)
-            val targetUri = if (compressedFile != null && compressedFile.exists() && compressedFile.length() > 0) {
-                Uri.fromFile(compressedFile)
-            } else {
-                videoUri
-            }
+            audioFile = VideoExportHelper.extractAudioFast(context, videoUri)
+            val useAudio = audioFile != null && audioFile.exists() && audioFile.length() > 0L
 
-            val mimeType = "video/mp4"
-            val fileSize = compressedFile?.length()
-                ?: context.contentResolver.openAssetFileDescriptor(videoUri, "r")?.use { it.length }
-                ?: -1L
-            if (fileSize <= 0L) return@withContext "Gagal membaca ukuran file video."
+            val mimeType = if (useAudio) "audio/mp4" else (context.contentResolver.getType(videoUri) ?: "video/mp4")
+            val fileSize = if (useAudio) audioFile!!.length()
+            else context.contentResolver.openAssetFileDescriptor(videoUri, "r")?.use { it.length } ?: -1L
+
+            if (fileSize <= 0L) return@withContext "Gagal membaca ukuran file media."
 
             val uploadEndpoint = "$HOST/upload/v1beta/files?key=$API_KEY"
-            val initJson = JSONObject().put("file", JSONObject().put("displayName", "abeeclip_fast"))
+            val initJson = JSONObject().put("file", JSONObject().put("displayName", "abeeclip_media"))
             val initReq = Request.Builder()
                 .url(uploadEndpoint)
                 .addHeader("X-Goog-Upload-Protocol", "resumable")
@@ -58,7 +53,7 @@ object GeminiHelper {
                 .build()
 
             val uploadUrl = client.newCall(initReq).execute().use { res ->
-                if (!res.isSuccessful) return@withContext "Gagal memulai unggahan (${res.code})."
+                if (!res.isSuccessful) return@withContext "Gagal mulai unggah (${res.code})."
                 res.header("X-Goog-Upload-URL") ?: res.header("x-goog-upload-url")
                     ?: return@withContext "URL unggah tidak ditemukan."
             }
@@ -67,11 +62,8 @@ object GeminiHelper {
                 override fun contentType() = mimeType.toMediaType()
                 override fun contentLength() = fileSize
                 override fun writeTo(sink: BufferedSink) {
-                    val stream = if (compressedFile != null && compressedFile.exists()) {
-                        compressedFile.inputStream()
-                    } else {
-                        context.contentResolver.openInputStream(targetUri)
-                    }
+                    val stream = if (useAudio) audioFile!!.inputStream()
+                    else context.contentResolver.openInputStream(videoUri)
                     stream?.use { input -> sink.writeAll(input.source()) }
                 }
             }
@@ -103,7 +95,7 @@ object GeminiHelper {
                 attempts++
             }
 
-            if (state != "ACTIVE") return@withContext "Video gagal diproses server AI ($state)."
+            if (state != "ACTIVE") return@withContext "Media gagal diproses server AI ($state)."
 
             val genEndpoint = "$HOST/v1beta/models/gemini-3.8-flash:generateContent?key=$API_KEY"
             val genJson = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
@@ -132,7 +124,7 @@ object GeminiHelper {
         } catch (e: Exception) {
             "Error: ${e.localizedMessage}"
         } finally {
-            compressedFile?.delete()
+            audioFile?.delete()
         }
     }
 }
