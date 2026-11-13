@@ -2,11 +2,13 @@ package com.abeeclip.app
 
 import android.content.ContentValues
 import android.content.Context
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.os.Handler
-import android.os.Looper
 import android.provider.MediaStore
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
@@ -15,8 +17,7 @@ import androidx.media3.effect.Crop
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.*
 import java.io.File
-import kotlin.coroutines.resume
-import kotlinx.coroutines.suspendCancellableCoroutine
+import java.nio.ByteBuffer
 
 object VideoExportHelper {
 
@@ -37,27 +38,47 @@ object VideoExportHelper {
         "Tersimpan di Downloads: $name"
     } catch (e: Exception) { "Gagal SRT: ${e.localizedMessage}" }
 
-    @OptIn(UnstableApi::class)
-    suspend fun compressForAi(context: Context, uri: Uri): File? = suspendCancellableCoroutine { cont ->
-        Handler(Looper.getMainLooper()).post {
-            try {
-                val out = File(context.cacheDir, "ai_temp_${System.currentTimeMillis()}.mp4")
-                val item = EditedMediaItem.Builder(MediaItem.fromUri(uri))
-                    .setEffects(Effects(emptyList(), listOf(Presentation.createForHeight(360))))
-                    .build()
-
-                Transformer.Builder(context).addListener(object : Transformer.Listener {
-                    override fun onCompleted(c: Composition, r: ExportResult) {
-                        if (cont.isActive) cont.resume(out)
-                    }
-                    override fun onError(c: Composition, r: ExportResult, e: ExportException) {
-                        out.delete()
-                        if (cont.isActive) cont.resume(null)
-                    }
-                }).build().start(item, out.absolutePath)
-            } catch (e: Exception) {
-                if (cont.isActive) cont.resume(null)
+    // Ekstrak jalur audio mentah secara instan (< 1 detik) tanpa membebani RAM/GPU
+    fun extractAudioFast(context: Context, uri: Uri): File? {
+        val extractor = MediaExtractor()
+        var muxer: MediaMuxer? = null
+        return try {
+            extractor.setDataSource(context, uri, null)
+            var audioTrackIndex = -1
+            for (i in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("audio/")) {
+                    audioTrackIndex = i
+                    break
+                }
             }
+            if (audioTrackIndex < 0) return null
+
+            extractor.selectTrack(audioTrackIndex)
+            val outFile = File(context.cacheDir, "fast_audio_${System.currentTimeMillis()}.m4a")
+            muxer = MediaMuxer(outFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val writeTrackIndex = muxer.addTrack(extractor.getTrackFormat(audioTrackIndex))
+            muxer.start()
+
+            val buffer = ByteBuffer.allocate(512 * 1024)
+            val bufferInfo = MediaCodec.BufferInfo()
+            while (true) {
+                val sampleSize = extractor.readSampleData(buffer, 0)
+                if (sampleSize < 0) break
+                bufferInfo.offset = 0
+                bufferInfo.size = sampleSize
+                bufferInfo.presentationTimeUs = extractor.sampleTime
+                bufferInfo.flags = extractor.sampleFlags
+                muxer.writeSampleData(writeTrackIndex, buffer, bufferInfo)
+                extractor.advance()
+            }
+            outFile
+        } catch (e: Exception) {
+            null
+        } finally {
+            try { muxer?.stop(); muxer?.release() } catch (_: Exception) {}
+            try { extractor.release() } catch (_: Exception) {}
         }
     }
 
