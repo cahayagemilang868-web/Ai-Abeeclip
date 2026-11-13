@@ -24,9 +24,9 @@ object GeminiHelper {
     private val HOST = "https://$SUB.$DOM"
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(45, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(120, TimeUnit.SECONDS)
         .build()
 
     suspend fun analyzeVideo(context: Context, videoUri: Uri, taskPrompt: String): String = withContext(Dispatchers.IO) {
@@ -97,8 +97,8 @@ object GeminiHelper {
 
             if (state != "ACTIVE") return@withContext "Media gagal diproses server AI ($state)."
 
-            // Mencoba model utama lalu otomatis beralih ke model cadangan jika sibuk (503/timeout)
-            val models = listOf("gemini-3.8-flash", "gemini-2.0-flash")
+            // Mencoba model aktif terbaru secara bergantian jika antrean penuh
+            val models = listOf("gemini-3.8-flash-lite", "gemini-3.8-flash", "gemini-3.8-flash")
             var lastError = ""
 
             for (model in models) {
@@ -132,10 +132,10 @@ object GeminiHelper {
                 } catch (e: Exception) {
                     lastError = "($model) ${e.localizedMessage}"
                 }
-                delay(1500)
+                delay(2000)
             }
 
-            "Server AI sedang sibuk. Detail: $lastError"
+            "Server AI sedang penuh. Detail: $lastError"
         } catch (e: Exception) {
             "Error: ${e.localizedMessage}"
         } finally {
