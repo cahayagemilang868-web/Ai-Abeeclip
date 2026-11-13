@@ -31,7 +31,15 @@ fun AiActionSection(
     val scope = rememberCoroutineScope()
     var loading by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf("Pilih video dari perangkat lalu jalankan analisis AI atau Render MP4.") }
+    var result by remember { mutableStateOf("Pilih video lalu tekan Momen AI, Subtitle, atau Potong & Render MP4.") }
+    var startTime by remember { mutableStateOf("00:00") }
+    var endTime by remember { mutableStateOf("00:30") }
+
+    fun parseSec(t: String): Long {
+        val p = t.trim().split(":")
+        return if (p.size == 2) (p[0].toLongOrNull() ?: 0L) * 60 + (p[1].toLongOrNull() ?: 0L)
+        else p[0].toLongOrNull() ?: 0L
+    }
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
@@ -39,7 +47,7 @@ fun AiActionSection(
                 val u = uri ?: return@Button Unit.also { result = "Pilih video dulu!" }
                 loading = true
                 scope.launch {
-                    result = GeminiHelper.analyzeVideo(ctx, u, "Temukan 3 Golden Moment viral beserta menit mulai-selesai dan alasannya dalam bahasa Indonesia.")
+                    result = GeminiHelper.analyzeVideo(ctx, u, "Temukan 3 Golden Moment viral beserta format waktu MM:SS mulai dan selesai serta alasannya dalam bahasa Indonesia.")
                     loading = false
                 }
             },
@@ -85,23 +93,55 @@ fun AiActionSection(
         }
     }
 
+    // Panel Auto-Trim Klip (Potong Menit Mulai - Selesai)
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF181822)).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("Potong Klip (Auto-Trim Menit)", color = Color(0xFFB388FF), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = startTime, onValueChange = { startTime = it },
+                label = { Text("Mulai (MM:SS)", fontSize = 11.sp) },
+                modifier = Modifier.weight(1f), singleLine = true
+            )
+            OutlinedTextField(
+                value = endTime, onValueChange = { endTime = it },
+                label = { Text("Selesai (MM:SS)", fontSize = 11.sp) },
+                modifier = Modifier.weight(1f), singleLine = true
+            )
+        }
+        Button(
+            onClick = {
+                val u = uri ?: return@Button Unit.also { Toast.makeText(ctx, "Pilih video dulu!", Toast.LENGTH_SHORT).show() }
+                exporting = true; result = "Memotong & merender klip ($startTime - $endTime)..."
+                VideoExportHelper.exportMp4(ctx, u, offsetX, ratio, parseSec(startTime), parseSec(endTime)) { msg ->
+                    exporting = false; result = msg; Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+                }
+            },
+            enabled = !exporting, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF))
+        ) {
+            Icon(Icons.Default.ContentCut, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(if (exporting) "Memotong Klip..." else "Potong Klip & Simpan MP4", color = Color.White, fontWeight = FontWeight.Bold)
+        }
+    }
+
     Button(
         onClick = {
             val u = uri ?: return@Button Unit.also { Toast.makeText(ctx, "Pilih video dulu!", Toast.LENGTH_SHORT).show() }
-            exporting = true
-            result = "Merender video MP4 rasio $ratio..."
-            VideoExportHelper.exportMp4(ctx, u, offsetX, ratio) { msg ->
-                exporting = false
-                result = msg
-                Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+            exporting = true; result = "Merender video penuh rasio $ratio..."
+            VideoExportHelper.exportMp4(ctx, u, offsetX, ratio, 0L, 0L) { msg ->
+                exporting = false; result = msg; Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
             }
         },
-        enabled = !exporting, modifier = Modifier.fillMaxWidth().height(50.dp), shape = RoundedCornerShape(14.dp),
+        enabled = !exporting, modifier = Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00BFA5))
     ) {
         Icon(Icons.Default.MovieCreation, null, tint = Color.Black)
         Spacer(Modifier.width(8.dp))
-        Text(if (exporting) "Merender MP4..." else "Render & Simpan MP4 ke Galeri", color = Color.Black, fontWeight = FontWeight.Bold)
+        Text(if (exporting) "Merender MP4..." else "Render Video Penuh ke Galeri", color = Color.Black, fontWeight = FontWeight.Bold)
     }
 
     Column(
@@ -112,17 +152,12 @@ fun AiActionSection(
             Text("Hasil AI & Ekspor Teks", color = Color(0xFF64FFDA), fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (loading) CircularProgressIndicator(Modifier.size(16.dp), color = Color(0xFFB388FF), strokeWidth = 2.dp)
-                OptionChip("Salin", false) {
-                    clip.setText(AnnotatedString(result))
-                    Toast.makeText(ctx, "Disalin!", Toast.LENGTH_SHORT).show()
-                }
-                OptionChip(".SRT", true, Color(0xFF282044), Color(0xFFB388FF)) {
-                    Toast.makeText(ctx, VideoExportHelper.saveSrt(ctx, result), Toast.LENGTH_LONG).show()
-                }
+                OptionChip("Salin", false) { clip.setText(AnnotatedString(result)); Toast.makeText(ctx, "Disalin!", Toast.LENGTH_SHORT).show() }
+                OptionChip(".SRT", true, Color(0xFF282044), Color(0xFFB388FF)) { Toast.makeText(ctx, VideoExportHelper.saveSrt(ctx, result), Toast.LENGTH_LONG).show() }
             }
         }
         Spacer(Modifier.height(8.dp))
-        val displayMsg = if (loading) "Memproses video dengan Gemini AI..." else result
+        val displayMsg = if (loading) "Mengompres & memproses video super cepat..." else result
         Text(displayMsg, color = textColor, fontSize = 13.sp, fontFamily = fontItem.family, fontWeight = fontItem.weight)
     }
 }
