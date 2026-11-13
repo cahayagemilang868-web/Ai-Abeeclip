@@ -1,9 +1,12 @@
 package com.abeeclip.app
+
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
@@ -12,8 +15,11 @@ import androidx.media3.effect.Crop
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.*
 import java.io.File
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 object VideoExportHelper {
+
     fun saveSrt(context: Context, text: String): String = try {
         val name = "Abeeclip_${System.currentTimeMillis()}.srt"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -32,7 +38,34 @@ object VideoExportHelper {
     } catch (e: Exception) { "Gagal SRT: ${e.localizedMessage}" }
 
     @OptIn(UnstableApi::class)
-    fun exportMp4(context: Context, uri: Uri, offsetX: Float, ratio: String, onDone: (String) -> Unit) {
+    suspend fun compressForAi(context: Context, uri: Uri): File? = suspendCancellableCoroutine { cont ->
+        Handler(Looper.getMainLooper()).post {
+            try {
+                val out = File(context.cacheDir, "ai_temp_${System.currentTimeMillis()}.mp4")
+                val item = EditedMediaItem.Builder(MediaItem.fromUri(uri))
+                    .setEffects(Effects(emptyList(), listOf(Presentation.createForHeight(360))))
+                    .build()
+
+                Transformer.Builder(context).addListener(object : Transformer.Listener {
+                    override fun onCompleted(c: Composition, r: ExportResult) {
+                        if (cont.isActive) cont.resume(out)
+                    }
+                    override fun onError(c: Composition, r: ExportResult, e: ExportException) {
+                        out.delete()
+                        if (cont.isActive) cont.resume(null)
+                    }
+                }).build().start(item, out.absolutePath)
+            } catch (e: Exception) {
+                if (cont.isActive) cont.resume(null)
+            }
+        }
+    }
+
+    @OptIn(UnstableApi::class)
+    fun exportMp4(
+        context: Context, uri: Uri, offsetX: Float, ratio: String,
+        startSec: Long = 0L, endSec: Long = 0L, onDone: (String) -> Unit
+    ) {
         try {
             val out = File(context.cacheDir, "render_${System.currentTimeMillis()}.mp4")
             val s = (offsetX / 220f).coerceIn(-0.45f, 0.45f)
@@ -42,14 +75,30 @@ object VideoExportHelper {
                 else -> Crop(-1f, 1f, -1f, 1f)
             }
             val h = if (ratio == "9:16") 1280 else if (ratio == "1:1") 1080 else 720
-            val item = EditedMediaItem.Builder(MediaItem.fromUri(uri)).setEffects(Effects(emptyList(), listOf(crop, Presentation.createForHeight(h)))).build()
+
+            val mediaBuilder = MediaItem.Builder().setUri(uri)
+            if (endSec > startSec) {
+                mediaBuilder.setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(startSec * 1000L)
+                        .setEndPositionMs(endSec * 1000L)
+                        .build()
+                )
+            }
+
+            val item = EditedMediaItem.Builder(mediaBuilder.build())
+                .setEffects(Effects(emptyList(), listOf(crop, Presentation.createForHeight(h))))
+                .build()
+
             Transformer.Builder(context).addListener(object : Transformer.Listener {
                 override fun onCompleted(c: Composition, r: ExportResult) {
                     val fn = "AI_Abeeclip_${System.currentTimeMillis()}.mp4"
                     val v = ContentValues().apply {
                         put(MediaStore.Video.Media.DISPLAY_NAME, fn)
                         put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/AI Abeeclip")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/AI Abeeclip")
+                        }
                     }
                     context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v)?.let { u ->
                         context.contentResolver.openOutputStream(u)?.use { o -> out.inputStream().use { i -> i.copyTo(o) } }
