@@ -2,6 +2,7 @@ package com.abeeclip.app
 
 import android.content.Context
 import android.net.Uri
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -24,9 +25,9 @@ object GeminiHelper {
     private val HOST = "https://$SUB.$DOM"
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(120, TimeUnit.SECONDS)
+        .connectTimeout(45, TimeUnit.SECONDS)
+        .readTimeout(90, TimeUnit.SECONDS)
+        .writeTimeout(90, TimeUnit.SECONDS)
         .build()
 
     suspend fun analyzeVideo(context: Context, videoUri: Uri, taskPrompt: String): String = withContext(Dispatchers.IO) {
@@ -34,15 +35,26 @@ object GeminiHelper {
         try {
             audioFile = VideoExportHelper.extractAudioFast(context, videoUri)
             val useAudio = audioFile != null && audioFile.exists() && audioFile.length() > 0L
-
             val mimeType = if (useAudio) "audio/mp4" else (context.contentResolver.getType(videoUri) ?: "video/mp4")
             val fileSize = if (useAudio) audioFile!!.length()
             else context.contentResolver.openAssetFileDescriptor(videoUri, "r")?.use { it.length } ?: -1L
 
             if (fileSize <= 0L) return@withContext "Gagal membaca ukuran file media."
 
+            // JALUR CEPAT (< 10 MB): Kirim langsung tanpa antrean Files API
+            if (fileSize < 10 * 1024 * 1024) {
+                val bytes = if (useAudio) audioFile!!.readBytes()
+                else context.contentResolver.openInputStream(videoUri)?.use { it.readBytes() }
+                    ?: return@withContext "Gagal membaca data media."
+
+                val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                val partMedia = JSONObject().put("inlineData", JSONObject().put("mimeType", mimeType).put("data", b64))
+                return@withContext callGeminiWithRetry(partMedia, taskPrompt)
+            }
+
+            // JALUR FILE BESAR (>= 10 MB): Gunakan Files API untuk podcast panjang
             val uploadEndpoint = "$HOST/upload/v1beta/files?key=$API_KEY"
-            val initJson = JSONObject().put("file", JSONObject().put("displayName", "abeeclip_media"))
+            val initJson = JSONObject().put("file", JSONObject().put("displayName", "abeeclip_long"))
             val initReq = Request.Builder()
                 .url(uploadEndpoint)
                 .addHeader("X-Goog-Upload-Protocol", "resumable")
@@ -83,7 +95,6 @@ object GeminiHelper {
 
             val fileUri = fileInfo.optString("uri")
             val fileName = fileInfo.optString("name")
-
             var state = fileInfo.optString("state")
             var attempts = 0
             while (state == "PROCESSING" && attempts < 20) {
@@ -95,51 +106,53 @@ object GeminiHelper {
                 attempts++
             }
 
-            if (state != "ACTIVE") return@withContext "Media gagal diproses server AI ($state)."
-
-            // Mencoba model aktif terbaru secara bergantian jika antrean penuh
-            val models = listOf("gemini-3.8-flash-lite", "gemini-3.8-flash", "gemini-3.8-flash")
-            var lastError = ""
-
-            for (model in models) {
-                try {
-                    val genEndpoint = "$HOST/v1beta/models/$model:generateContent?key=$API_KEY"
-                    val genJson = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
-                        .put(JSONObject().put("fileData", JSONObject().put("mimeType", mimeType).put("fileUri", fileUri)))
-                        .put(JSONObject().put("text", taskPrompt)))))
-
-                    val genReq = Request.Builder()
-                        .url(genEndpoint)
-                        .post(genJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                        .build()
-
-                    client.newCall(genReq).execute().use { res ->
-                        val body = res.body?.string() ?: ""
-                        if (res.isSuccessful) {
-                            val resultText = JSONObject(body)
-                                .optJSONArray("candidates")
-                                ?.optJSONObject(0)
-                                ?.optJSONObject("content")
-                                ?.optJSONArray("parts")
-                                ?.optJSONObject(0)
-                                ?.optString("text")
-                            if (!resultText.isNullOrBlank()) return@withContext resultText
-                        } else {
-                            val err = JSONObject(body).optJSONObject("error")?.optString("message") ?: "Error ${res.code}"
-                            lastError = "($model: ${res.code}) $err"
-                        }
-                    }
-                } catch (e: Exception) {
-                    lastError = "($model) ${e.localizedMessage}"
-                }
-                delay(2000)
-            }
-
-            "Server AI sedang penuh. Detail: $lastError"
+            if (state != "ACTIVE") return@withContext "Media gagal diproses server ($state)."
+            val partFile = JSONObject().put("fileData", JSONObject().put("mimeType", mimeType).put("fileUri", fileUri))
+            return@withContext callGeminiWithRetry(partFile, taskPrompt)
         } catch (e: Exception) {
             "Error: ${e.localizedMessage}"
         } finally {
             audioFile?.delete()
         }
+    }
+
+    private suspend fun callGeminiWithRetry(mediaPart: JSONObject, taskPrompt: String): String {
+        val models = listOf("gemini-3.8-flash-lite", "gemini-3.8-flash")
+        var lastError = ""
+
+        for (model in models) {
+            try {
+                val genEndpoint = "$HOST/v1beta/models/$model:generateContent?key=$API_KEY"
+                val genJson = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
+                    .put(mediaPart)
+                    .put(JSONObject().put("text", taskPrompt)))))
+
+                val genReq = Request.Builder()
+                    .url(genEndpoint)
+                    .post(genJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+
+                client.newCall(genReq).execute().use { res ->
+                    val body = res.body?.string() ?: ""
+                    if (res.isSuccessful) {
+                        val resultText = JSONObject(body)
+                            .optJSONArray("candidates")
+                            ?.optJSONObject(0)
+                            ?.optJSONObject("content")
+                            ?.optJSONArray("parts")
+                            ?.optJSONObject(0)
+                            ?.optString("text")
+                        if (!resultText.isNullOrBlank()) return resultText
+                    } else {
+                        val err = JSONObject(body).optJSONObject("error")?.optString("message") ?: "Error ${res.code}"
+                        lastError = "($model: ${res.code}) $err"
+                    }
+                }
+            } catch (e: Exception) {
+                lastError = "($model) ${e.localizedMessage}"
+            }
+            delay(1000)
+        }
+        return "Gagal AI: $lastError"
     }
 }
