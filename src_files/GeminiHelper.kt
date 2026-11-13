@@ -24,9 +24,9 @@ object GeminiHelper {
     private val HOST = "https://$SUB.$DOM"
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(180, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)
-        .writeTimeout(180, TimeUnit.SECONDS)
+        .connectTimeout(45, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
     suspend fun analyzeVideo(context: Context, videoUri: Uri, taskPrompt: String): String = withContext(Dispatchers.IO) {
@@ -86,8 +86,8 @@ object GeminiHelper {
 
             var state = fileInfo.optString("state")
             var attempts = 0
-            while (state == "PROCESSING" && attempts < 30) {
-                delay(2000)
+            while (state == "PROCESSING" && attempts < 20) {
+                delay(1500)
                 val checkReq = Request.Builder().url("$HOST/v1beta/$fileName?key=$API_KEY").get().build()
                 state = client.newCall(checkReq).execute().use { res ->
                     JSONObject(res.body?.string() ?: "").optString("state")
@@ -97,30 +97,45 @@ object GeminiHelper {
 
             if (state != "ACTIVE") return@withContext "Media gagal diproses server AI ($state)."
 
-            val genEndpoint = "$HOST/v1beta/models/gemini-3.8-flash:generateContent?key=$API_KEY"
-            val genJson = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
-                .put(JSONObject().put("fileData", JSONObject().put("mimeType", mimeType).put("fileUri", fileUri)))
-                .put(JSONObject().put("text", taskPrompt)))))
+            // Mencoba model utama lalu otomatis beralih ke model cadangan jika sibuk (503/timeout)
+            val models = listOf("gemini-3.8-flash", "gemini-2.0-flash")
+            var lastError = ""
 
-            val genReq = Request.Builder()
-                .url(genEndpoint)
-                .post(genJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
-                .build()
+            for (model in models) {
+                try {
+                    val genEndpoint = "$HOST/v1beta/models/$model:generateContent?key=$API_KEY"
+                    val genJson = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
+                        .put(JSONObject().put("fileData", JSONObject().put("mimeType", mimeType).put("fileUri", fileUri)))
+                        .put(JSONObject().put("text", taskPrompt)))))
 
-            client.newCall(genReq).execute().use { res ->
-                val body = res.body?.string() ?: return@withContext "Respons AI kosong."
-                if (!res.isSuccessful) {
-                    val err = JSONObject(body).optJSONObject("error")?.optString("message") ?: "Error ${res.code}"
-                    return@withContext "Gagal AI (${res.code}): $err"
+                    val genReq = Request.Builder()
+                        .url(genEndpoint)
+                        .post(genJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType()))
+                        .build()
+
+                    client.newCall(genReq).execute().use { res ->
+                        val body = res.body?.string() ?: ""
+                        if (res.isSuccessful) {
+                            val resultText = JSONObject(body)
+                                .optJSONArray("candidates")
+                                ?.optJSONObject(0)
+                                ?.optJSONObject("content")
+                                ?.optJSONArray("parts")
+                                ?.optJSONObject(0)
+                                ?.optString("text")
+                            if (!resultText.isNullOrBlank()) return@withContext resultText
+                        } else {
+                            val err = JSONObject(body).optJSONObject("error")?.optString("message") ?: "Error ${res.code}"
+                            lastError = "($model: ${res.code}) $err"
+                        }
+                    }
+                } catch (e: Exception) {
+                    lastError = "($model) ${e.localizedMessage}"
                 }
-                JSONObject(body)
-                    .optJSONArray("candidates")
-                    ?.optJSONObject(0)
-                    ?.optJSONObject("content")
-                    ?.optJSONArray("parts")
-                    ?.optJSONObject(0)
-                    ?.optString("text") ?: "Tidak ada hasil teks dari AI."
+                delay(1500)
             }
+
+            "Server AI sedang sibuk. Detail: $lastError"
         } catch (e: Exception) {
             "Error: ${e.localizedMessage}"
         } finally {
