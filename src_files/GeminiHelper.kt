@@ -41,7 +41,6 @@ object GeminiHelper {
 
             if (fileSize <= 0L) return@withContext "Gagal membaca ukuran file media."
 
-            // JALUR CEPAT (< 10 MB): Kirim langsung tanpa antrean Files API
             if (fileSize < 10 * 1024 * 1024) {
                 val bytes = if (useAudio) audioFile!!.readBytes()
                 else context.contentResolver.openInputStream(videoUri)?.use { it.readBytes() }
@@ -49,10 +48,9 @@ object GeminiHelper {
 
                 val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
                 val partMedia = JSONObject().put("inlineData", JSONObject().put("mimeType", mimeType).put("data", b64))
-                return@withContext callGeminiWithRetry(partMedia, taskPrompt)
+                return@withContext callGeminiOfficial(partMedia, taskPrompt)
             }
 
-            // JALUR FILE BESAR (>= 10 MB): Gunakan Files API untuk podcast panjang
             val uploadEndpoint = "$HOST/upload/v1beta/files?key=$API_KEY"
             val initJson = JSONObject().put("file", JSONObject().put("displayName", "abeeclip_long"))
             val initReq = Request.Builder()
@@ -108,7 +106,7 @@ object GeminiHelper {
 
             if (state != "ACTIVE") return@withContext "Media gagal diproses server ($state)."
             val partFile = JSONObject().put("fileData", JSONObject().put("mimeType", mimeType).put("fileUri", fileUri))
-            return@withContext callGeminiWithRetry(partFile, taskPrompt)
+            return@withContext callGeminiOfficial(partFile, taskPrompt)
         } catch (e: Exception) {
             "Error: ${e.localizedMessage}"
         } finally {
@@ -116,16 +114,20 @@ object GeminiHelper {
         }
     }
 
-    private suspend fun callGeminiWithRetry(mediaPart: JSONObject, taskPrompt: String): String {
-        val models = listOf("gemini-3.8-flash-lite", "gemini-3.8-flash")
+    private suspend fun callGeminiOfficial(mediaPart: JSONObject, taskPrompt: String): String {
+        val models = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro")
         var lastError = ""
 
         for (model in models) {
             try {
                 val genEndpoint = "$HOST/v1beta/models/$model:generateContent?key=$API_KEY"
-                val genJson = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
-                    .put(mediaPart)
-                    .put(JSONObject().put("text", taskPrompt)))))
+                val genJson = JSONObject()
+                    .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
+                        .put(mediaPart)
+                        .put(JSONObject().put("text", taskPrompt)))))
+                    .put("generationConfig", JSONObject()
+                        .put("temperature", 0.4)
+                        .put("maxOutputTokens", 4096))
 
                 val genReq = Request.Builder()
                     .url(genEndpoint)
@@ -151,7 +153,7 @@ object GeminiHelper {
             } catch (e: Exception) {
                 lastError = "($model) ${e.localizedMessage}"
             }
-            delay(1000)
+            delay(1500)
         }
         return "Gagal AI: $lastError"
     }
