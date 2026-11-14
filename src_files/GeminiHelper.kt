@@ -115,7 +115,7 @@ object GeminiHelper {
     }
 
     private suspend fun callGeminiOfficial(mediaPart: JSONObject, taskPrompt: String): String {
-        val models = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro")
+        val models = listOf("gemini-3.1-flash-lite-preview", "gemini-3-flash-preview", "gemini-3.1-pro-preview")
         var lastError = ""
 
         for (model in models) {
